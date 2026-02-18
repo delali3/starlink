@@ -17,6 +17,7 @@
                 <div>
                     <p class="text-green-100 text-sm font-medium">Revenue Today</p>
                     <p class="mt-2 text-3xl font-bold">GHC {{ number_format($revenueToday, 2) }}</p>
+                    <p class="text-green-100 text-xs mt-1">Base: {{ number_format($baseRevenueToday, 2) }} + Fee: {{ number_format($serviceChargeToday, 2) }}</p>
                 </div>
                 <div class="bg-green-400 bg-opacity-30 rounded-full p-3">
                     <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -31,6 +32,7 @@
                 <div>
                     <p class="text-blue-100 text-sm font-medium">Revenue This Month</p>
                     <p class="mt-2 text-3xl font-bold">GHC {{ number_format($revenueThisMonth, 2) }}</p>
+                    <p class="text-blue-100 text-xs mt-1">Base: {{ number_format($baseRevenueThisMonth, 2) }} + Fee: {{ number_format($serviceChargeThisMonth, 2) }}</p>
                 </div>
                 <div class="bg-blue-400 bg-opacity-30 rounded-full p-3">
                     <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -45,6 +47,7 @@
                 <div>
                     <p class="text-purple-100 text-sm font-medium">Total Revenue</p>
                     <p class="mt-2 text-3xl font-bold">GHC {{ number_format($revenueTotal, 2) }}</p>
+                    <p class="text-purple-100 text-xs mt-1">Base: {{ number_format($baseRevenueTotal, 2) }} + Fee: {{ number_format($serviceChargeTotal, 2) }}</p>
                 </div>
                 <div class="bg-purple-400 bg-opacity-30 rounded-full p-3">
                     <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -79,27 +82,52 @@
         </div>
     </div>
 
-    <!-- Revenue Chart -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Monthly Revenue (Last 12 Months)</h2>
-        <div class="h-64 flex items-end justify-between space-x-2">
-            @php
-                $maxRevenue = $monthlyRevenue->max('total') ?: 1;
-            @endphp
-            @foreach($monthlyRevenue as $month)
-            <div class="flex-1 flex flex-col items-center">
-                <div class="w-full bg-indigo-500 rounded-t hover:bg-indigo-600 transition-colors cursor-pointer relative group" 
-                     style="height: {{ ($month->total / $maxRevenue) * 100 }}%"
-                     title="GHC {{ number_format($month->total, 2) }}">
-                    <div class="hidden group-hover:block absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
-                        GHC {{ number_format($month->total, 2) }}
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Revenue Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Monthly Revenue</h2>
+            <canvas id="revenueChart" height="250"></canvas>
+        </div>
+
+        <!-- User Growth Chart -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">User Growth</h2>
+            <canvas id="userGrowthChart" height="250"></canvas>
+        </div>
+    </div>
+
+    @if(isset($organizations) && $organizations->count() > 0)
+    <!-- Organization Stats -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Organizations Overview</h2>
+            <a href="{{ route('organizations.index') }}" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">View All →</a>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            @foreach($organizations as $org)
+            <a href="{{ route('organizations.show', $org) }}" class="block p-4 border-2 border-gray-200 dark:border-gray-600 rounded-lg hover:border-indigo-400 hover:shadow-md transition">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-gray-900 dark:text-white">{{ $org->name }}</h3>
+                    <span class="px-2 py-0.5 text-xs rounded-full {{ $org->status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
+                        {{ ucfirst($org->status) }}
+                    </span>
+                </div>
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm text-gray-500 dark:text-gray-400">Users:</span>
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">{{ $org->users_count ?? 0 }}</span>
+                    </div>
+                    <div class="flex items-center justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <span class="text-sm text-gray-500 dark:text-gray-400">Total Revenue:</span>
+                        <span class="text-sm font-bold text-green-600">GHC {{ number_format($org->total_revenue ?? 0, 2) }}</span>
                     </div>
                 </div>
-                <span class="text-xs text-gray-500 mt-2">{{ \Carbon\Carbon::parse($month->month)->format('M') }}</span>
-            </div>
+            </a>
             @endforeach
         </div>
     </div>
+    @endif
 
     <!-- Recent Payments -->
     <div class="bg-white rounded-lg shadow overflow-hidden">
@@ -128,11 +156,23 @@
                             <div class="text-sm font-medium text-gray-900">{{ $payment->user->name }}</div>
                             <div class="text-sm text-gray-500">{{ $payment->user->phone }}</div>
                         </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
-                            GHC {{ number_format($payment->amount, 2) }}
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-semibold text-green-600">GHC {{ number_format($payment->amount, 2) }}</div>
+                            @if($payment->service_charge > 0)
+                            <div class="text-xs text-gray-500">Base: {{ number_format($payment->base_amount, 2) }} + Fee: {{ number_format($payment->service_charge, 2) }}</div>
+                            @else
+                            <div class="text-xs text-gray-500">No service charge</div>
+                            @endif
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="text-xs font-medium px-2 py-1 rounded {{ $payment->payment_provider === 'paystack' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800' }}">
+                            @php
+                                $providerStyle = match($payment->payment_provider) {
+                                    'paystack' => 'bg-blue-100 text-blue-800',
+                                    'cash' => 'bg-green-100 text-green-800',
+                                    default => 'bg-orange-100 text-orange-800',
+                                };
+                            @endphp
+                            <span class="text-xs font-medium px-2 py-1 rounded {{ $providerStyle }}">
                                 {{ ucfirst($payment->payment_provider) }}
                             </span>
                         </td>
@@ -153,25 +193,77 @@
     </div>
 
     <!-- Quick Actions -->
-    <div class="bg-white rounded-lg shadow p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Quick Actions</h2>
         <div class="flex flex-wrap gap-3">
             <a href="{{ route('admins.create') }}" class="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition">
-                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-                </svg>
                 Register Admin
             </a>
             <a href="{{ route('users.create') }}" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition">
-                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
                 Register User
+            </a>
+            <a href="{{ route('organizations.create') }}" class="inline-flex items-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition">
+                Create Organization
+            </a>
+            <a href="{{ route('sms.create') }}" class="inline-flex items-center px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-medium rounded-lg transition">
+                Send Bulk SMS
             </a>
             <a href="{{ route('users.unpaid') }}" class="inline-flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition">
                 View Unpaid Users
             </a>
+            <a href="{{ route('export.payments') }}" class="inline-flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition">
+                Export Payments CSV
+            </a>
         </div>
     </div>
 </div>
+
+@push('scripts')
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+    const revenueCtx = document.getElementById('revenueChart').getContext('2d');
+    new Chart(revenueCtx, {
+        type: 'bar',
+        data: {
+            labels: {!! json_encode($monthlyRevenue->pluck('month')->map(fn($m) => \Carbon\Carbon::parse($m)->format('M Y'))) !!},
+            datasets: [{
+                label: 'Revenue (GHC)',
+                data: {!! json_encode($monthlyRevenue->pluck('total')) !!},
+                backgroundColor: 'rgba(99, 102, 241, 0.7)',
+                borderColor: 'rgba(99, 102, 241, 1)',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+
+    @if(isset($monthlyUsers))
+    const userCtx = document.getElementById('userGrowthChart').getContext('2d');
+    new Chart(userCtx, {
+        type: 'line',
+        data: {
+            labels: {!! json_encode($monthlyUsers->pluck('month')->map(fn($m) => \Carbon\Carbon::parse($m)->format('M Y'))) !!},
+            datasets: [{
+                label: 'New Users',
+                data: {!! json_encode($monthlyUsers->pluck('total')) !!},
+                borderColor: 'rgba(16, 185, 129, 1)',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+    @endif
+</script>
+@endpush
 @endsection

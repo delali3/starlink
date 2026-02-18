@@ -3,8 +3,10 @@
 namespace App\Services\Payment;
 
 use App\Models\Payment;
+use App\Models\Setting;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Notifications\PaymentConfirmation;
 use Illuminate\Support\Str;
 
 class PaymentService
@@ -18,36 +20,27 @@ class PaymentService
 
     /**
      * Get the configured payment provider.
-     *
-     * @return PaymentProviderInterface
      */
     private function getProvider(): PaymentProviderInterface
     {
-        $providerName = config('services.payment.provider', 'paystack');
+        $providerName = Setting::get('payment_provider', config('services.payment.provider', 'hubtel'));
 
         return match ($providerName) {
-            'hubtel' => new HubtelProvider(),
-            default => new PaystackProvider(),
+            'paystack' => new PaystackProvider(),
+            default => new HubtelProvider(),
         };
     }
 
     /**
      * Initialize a payment.
-     *
-     * @param User $user
-     * @param string|null $subscriptionType
-     * @param float|null $customAmount
-     * @return array
      */
     public function initializePayment(User $user, ?string $subscriptionType = null, ?float $customAmount = null): array
     {
-        // Determine amount
+        // Determine base amount
         if ($customAmount) {
-            // Custom amount payment
-            $amount = $customAmount;
+            $baseAmount = $customAmount;
             $type = 'custom';
         } elseif ($subscriptionType) {
-            // Validate subscription type
             if (!in_array($subscriptionType, ['daily', 'monthly'])) {
                 return [
                     'status' => false,
@@ -55,10 +48,9 @@ class PaymentService
                 ];
             }
 
-            // Get amount based on subscription type
-            $amount = $subscriptionType === 'daily'
-                ? config('services.payment.daily_price', 3)
-                : config('services.payment.monthly_price', 60);
+            $baseAmount = $subscriptionType === 'daily'
+                ? (float) Setting::get('daily_price', config('services.payment.daily_price', 3))
+                : (float) Setting::get('monthly_price', config('services.payment.monthly_price', 60));
             $type = $subscriptionType;
         } else {
             return [
@@ -67,6 +59,11 @@ class PaymentService
             ];
         }
 
+        // Calculate service charge (2% on top)
+        $chargePercent = (float) Setting::get('service_charge_percentage', 2);
+        $serviceCharge = round($baseAmount * ($chargePercent / 100), 2);
+        $totalAmount = $baseAmount + $serviceCharge;
+
         // Generate unique reference
         $reference = $this->generateReference();
 
@@ -74,29 +71,33 @@ class PaymentService
         $payment = Payment::create([
             'user_id' => $user->id,
             'reference' => $reference,
-            'amount' => $amount,
+            'base_amount' => $baseAmount,
+            'amount' => $totalAmount,
+            'service_charge' => $serviceCharge,
             'payment_provider' => $this->provider->getProviderName(),
             'status' => 'pending',
             'metadata' => [
                 'payment_type' => $type,
                 'subscription_type' => $subscriptionType,
+                'base_amount' => $baseAmount,
+                'service_charge' => $serviceCharge,
+                'service_charge_percentage' => $chargePercent,
             ],
         ]);
 
-        // Initialize payment with provider
+        // Initialize payment with provider (charge total including service charge)
         $result = $this->provider->initializePayment([
             'user_id' => $user->id,
             'customer_name' => $user->name,
             'phone' => $user->phone,
             'email' => $user->email,
-            'amount' => $amount,
+            'amount' => $totalAmount,
             'reference' => $reference,
             'subscription_type' => $subscriptionType ?? 'custom',
             'callback_url' => route('payment.callback'),
         ]);
 
         if ($result['status']) {
-            // Update payment with transaction ID
             $payment->update([
                 'transaction_id' => $result['data']['transaction_id'] ?? null,
             ]);
@@ -108,12 +109,13 @@ class PaymentService
                     'payment_id' => $payment->id,
                     'reference' => $reference,
                     'authorization_url' => $result['data']['authorization_url'] ?? null,
-                    'amount' => $amount,
+                    'amount' => $totalAmount,
+                    'base_amount' => $baseAmount,
+                    'service_charge' => $serviceCharge,
                 ],
             ];
         }
 
-        // Mark payment as failed
         $payment->markAsFailed();
 
         return $result;
@@ -121,13 +123,9 @@ class PaymentService
 
     /**
      * Verify a payment and create subscription if successful.
-     *
-     * @param string $reference
-     * @return array
      */
     public function verifyPayment(string $reference): array
     {
-        // Find payment record
         $payment = Payment::where('reference', $reference)->first();
 
         if (!$payment) {
@@ -137,7 +135,6 @@ class PaymentService
             ];
         }
 
-        // Don't verify already successful payments
         if ($payment->isSuccessful()) {
             return [
                 'status' => true,
@@ -146,15 +143,17 @@ class PaymentService
             ];
         }
 
-        // Verify with provider
         $result = $this->provider->verifyPayment($reference);
 
         if ($result['status'] && $result['data']['status'] === 'success') {
-            // Update payment record
             $payment->markAsSuccessful($result['data']['transaction_id']);
 
-            // Create or extend subscription
             $subscription = $this->createOrExtendSubscription($payment);
+
+            // Send email notification if user has email
+            if ($payment->user && $payment->user->email) {
+                $payment->user->notify(new PaymentConfirmation($payment));
+            }
 
             return [
                 'status' => true,
@@ -166,7 +165,6 @@ class PaymentService
             ];
         }
 
-        // Mark as failed if verification failed
         $payment->markAsFailed();
 
         return $result;
@@ -174,20 +172,19 @@ class PaymentService
 
     /**
      * Create or extend subscription based on payment.
-     *
-     * @param Payment $payment
-     * @return Subscription
+     * Uses base_amount (before service charge) for day calculation.
      */
     private function createOrExtendSubscription(Payment $payment): Subscription
     {
         $user = $payment->user;
         $paymentType = $payment->metadata['payment_type'] ?? 'daily';
-        
-        // Determine subscription type and days
+
+        // Use base_amount for subscription calculation (exclude service charge)
+        $subscriptionAmount = $payment->base_amount ?? $payment->amount;
+
         if ($paymentType === 'custom') {
-            // For custom payments, calculate days based on daily rate
-            $dailyRate = config('services.payment.daily_price', 3);
-            $days = max(1, (int) floor($payment->amount / $dailyRate));
+            $dailyRate = (float) Setting::get('daily_price', config('services.payment.daily_price', 3));
+            $days = max(1, (int) floor($subscriptionAmount / $dailyRate));
             $subscriptionType = 'custom';
         } elseif ($paymentType === 'monthly') {
             $subscriptionType = 'monthly';
@@ -197,43 +194,38 @@ class PaymentService
             $days = 1;
         }
 
-        // Check if user has an active subscription
         $activeSubscription = $user->activeSubscription()->first();
 
         if ($activeSubscription && $activeSubscription->end_date >= now()) {
-            // Extend existing subscription
             $startDate = $activeSubscription->end_date->addDay();
             $endDate = $startDate->copy()->addDays($days - 1);
 
             $subscription = Subscription::create([
                 'user_id' => $user->id,
                 'type' => $subscriptionType,
-                'amount' => $payment->amount,
+                'amount' => $subscriptionAmount,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
                 'status' => 'active',
             ]);
 
-            // Mark old subscription as expired if it's a different type
             if ($activeSubscription->type !== $subscriptionType) {
                 $activeSubscription->markAsExpired();
             }
         } else {
-            // Create new subscription starting from today
             $startDate = now();
             $endDate = $startDate->copy()->addDays($days - 1);
 
             $subscription = Subscription::create([
                 'user_id' => $user->id,
                 'type' => $subscriptionType,
-                'amount' => $payment->amount,
+                'amount' => $subscriptionAmount,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
                 'status' => 'active',
             ]);
         }
 
-        // Link payment to subscription
         $payment->update(['subscription_id' => $subscription->id]);
 
         return $subscription;
@@ -241,8 +233,6 @@ class PaymentService
 
     /**
      * Generate a unique payment reference.
-     *
-     * @return string
      */
     private function generateReference(): string
     {
@@ -251,8 +241,6 @@ class PaymentService
 
     /**
      * Get the current provider instance.
-     *
-     * @return PaymentProviderInterface
      */
     public function getProviderInstance(): PaymentProviderInterface
     {

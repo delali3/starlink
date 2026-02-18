@@ -19,6 +19,8 @@ class Payment extends Model
         'subscription_id',
         'reference',
         'amount',
+        'base_amount',
+        'service_charge',
         'payment_provider',
         'status',
         'transaction_id',
@@ -35,6 +37,8 @@ class Payment extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'base_amount' => 'decimal:2',
+            'service_charge' => 'decimal:2',
             'metadata' => 'array',
             'paid_at' => 'datetime',
         ];

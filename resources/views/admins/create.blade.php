@@ -60,17 +60,34 @@
                 </div>
 
                 <!-- Role -->
-                <div>
+                <div x-data="{ role: '{{ old('role', request('organization_id') ? 'admin' : '') }}' }">
                     <label for="role" class="block text-sm font-medium text-gray-700 mb-2">Role</label>
-                    <select id="role" name="role" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent @error('role') border-red-500 @enderror">
+                    <select id="role" name="role" required x-model="role" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent @error('role') border-red-500 @enderror">
                         <option value="">Select Role</option>
-                        <option value="admin" {{ old('role') === 'admin' ? 'selected' : '' }}>Admin</option>
-                        <option value="superadmin" {{ old('role') === 'superadmin' ? 'selected' : '' }}>SuperAdmin</option>
+                        <option value="admin">Admin</option>
+                        <option value="superadmin">SuperAdmin</option>
                     </select>
                     <p class="mt-1 text-xs text-gray-500">SuperAdmin has full system access including revenue data</p>
                     @error('role')
                     <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                     @enderror
+
+                    <!-- Organization (shown only for admin role) -->
+                    @if(isset($organizations))
+                    <div class="mt-6" x-show="role === 'admin'" x-cloak>
+                        <label for="organization_id" class="block text-sm font-medium text-gray-700 mb-2">Organization</label>
+                        <select id="organization_id" name="organization_id" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent @error('organization_id') border-red-500 @enderror">
+                            <option value="">Select Organization</option>
+                            @foreach($organizations as $org)
+                            <option value="{{ $org->id }}" {{ old('organization_id', request('organization_id')) == $org->id ? 'selected' : '' }}>{{ $org->name }}</option>
+                            @endforeach
+                        </select>
+                        <p class="mt-1 text-xs text-gray-500">Required for admin role. Admin will only manage this organization's users.</p>
+                        @error('organization_id')
+                        <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    @endif
                 </div>
 
                 <!-- Submit -->

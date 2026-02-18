@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Organization;
 use App\Models\Payment;
 use App\Models\Subscription;
 use App\Models\User;
@@ -33,42 +34,80 @@ class DashboardController extends Controller
      */
     private function superAdminDashboard()
     {
-        // Revenue statistics
-        $revenueToday = Payment::where('status', 'success')
-            ->whereDate('paid_at', today())
-            ->sum('amount');
+        $orgFilter = session('admin_org_filter');
 
-        $revenueThisMonth = Payment::where('status', 'success')
+        // Base payment query with optional org filter
+        $paymentQuery = Payment::where('status', 'success');
+        if ($orgFilter) {
+            $paymentQuery->whereHas('user', fn($q) => $q->where('organization_id', $orgFilter));
+        }
+
+        // Revenue statistics (including service charges for admin view)
+        $revenueToday = (clone $paymentQuery)->whereDate('paid_at', today())->sum('amount');
+        $revenueThisMonth = (clone $paymentQuery)
             ->whereMonth('paid_at', now()->month)
             ->whereYear('paid_at', now()->year)
             ->sum('amount');
+        $revenueTotal = (clone $paymentQuery)->sum('amount');
 
-        $revenueTotal = Payment::where('status', 'success')->sum('amount');
+        // Service charge breakdown
+        $serviceChargeToday = (clone $paymentQuery)->whereDate('paid_at', today())->sum('service_charge');
+        $serviceChargeThisMonth = (clone $paymentQuery)
+            ->whereMonth('paid_at', now()->month)
+            ->whereYear('paid_at', now()->year)
+            ->sum('service_charge');
+        $serviceChargeTotal = (clone $paymentQuery)->sum('service_charge');
+
+        // Base revenue (what customers paid)
+        $baseRevenueToday = $revenueToday - $serviceChargeToday;
+        $baseRevenueThisMonth = $revenueThisMonth - $serviceChargeThisMonth;
+        $baseRevenueTotal = $revenueTotal - $serviceChargeTotal;
 
         // Subscription statistics
-        $activeSubscriptions = Subscription::where('status', 'active')
+        $subscriptionQuery = Subscription::query();
+        if ($orgFilter) {
+            $subscriptionQuery->whereHas('user', fn($q) => $q->where('organization_id', $orgFilter));
+        }
+
+        $activeSubscriptions = (clone $subscriptionQuery)
+            ->where('status', 'active')
             ->where('end_date', '>=', now())
             ->count();
 
-        $expiredSubscriptions = Subscription::where('status', 'expired')
-            ->orWhere('end_date', '<', now())
+        $expiredSubscriptions = (clone $subscriptionQuery)
+            ->where(function ($q) {
+                $q->where('status', 'expired')->orWhere('end_date', '<', now());
+            })
             ->count();
 
         // User statistics
-        $totalUsers = User::role('user')->count();
-        $activeUsers = User::role('user')->where('status', 'active')->count();
-        $suspendedUsers = User::role('user')->where('status', 'suspended')->count();
+        $userQuery = User::role('user');
+        if ($orgFilter) {
+            $userQuery->where('organization_id', $orgFilter);
+        }
+
+        $totalUsers = (clone $userQuery)->count();
+        $activeUsers = (clone $userQuery)->where('status', 'active')->count();
+        $suspendedUsers = (clone $userQuery)->where('status', 'suspended')->count();
+
+        // Organization stats
+        $totalOrganizations = Organization::count();
+        $activeOrganizations = Organization::where('status', 'active')->count();
 
         // Recent payments
-        $recentPayments = Payment::with('user')
-            ->where('status', 'success')
-            ->latest()
-            ->limit(10)
-            ->get();
+        $recentPaymentsQuery = Payment::with('user')->where('status', 'success');
+        if ($orgFilter) {
+            $recentPaymentsQuery->whereHas('user', fn($q) => $q->where('organization_id', $orgFilter));
+        }
+        $recentPayments = $recentPaymentsQuery->latest()->limit(10)->get();
 
         // Monthly revenue chart data (last 12 months)
-        $monthlyRevenue = Payment::where('status', 'success')
-            ->where('paid_at', '>=', now()->subMonths(12))
+        $monthlyRevenueQuery = Payment::where('status', 'success')
+            ->where('paid_at', '>=', now()->subMonths(12));
+        if ($orgFilter) {
+            $monthlyRevenueQuery->whereHas('user', fn($q) => $q->where('organization_id', $orgFilter));
+        }
+        $monthlyRevenue = $monthlyRevenueQuery
             ->select(
                 DB::raw('DATE_FORMAT(paid_at, "%Y-%m") as month'),
                 DB::raw('SUM(amount) as total')
@@ -77,45 +116,86 @@ class DashboardController extends Controller
             ->orderBy('month')
             ->get();
 
+        // Monthly user registration data (last 12 months)
+        $monthlyUsersQuery = User::role('user')
+            ->where('created_at', '>=', now()->subMonths(12));
+        if ($orgFilter) {
+            $monthlyUsersQuery->where('organization_id', $orgFilter);
+        }
+        $monthlyUsers = $monthlyUsersQuery
+            ->select(
+                DB::raw('DATE_FORMAT(created_at, "%Y-%m") as month'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->groupBy('month')
+            ->orderBy('month')
+            ->get();
+
+        // Organizations list for switcher with revenue data
+        $organizations = Organization::orderBy('name')->get();
+        foreach ($organizations as $org) {
+            $org->total_revenue = Payment::where('status', 'success')
+                ->whereHas('user', fn($q) => $q->where('organization_id', $org->id))
+                ->sum('amount');
+            $org->users_count = $org->users()->count();
+        }
+        $currentOrg = $orgFilter ? Organization::find($orgFilter) : null;
+
         return view('dashboard.superadmin', compact(
             'revenueToday',
             'revenueThisMonth',
             'revenueTotal',
+            'serviceChargeToday',
+            'serviceChargeThisMonth',
+            'serviceChargeTotal',
+            'baseRevenueToday',
+            'baseRevenueThisMonth',
+            'baseRevenueTotal',
             'activeSubscriptions',
             'expiredSubscriptions',
             'totalUsers',
             'activeUsers',
             'suspendedUsers',
+            'totalOrganizations',
+            'activeOrganizations',
             'recentPayments',
-            'monthlyRevenue'
+            'monthlyRevenue',
+            'monthlyUsers',
+            'organizations',
+            'currentOrg'
         ));
     }
 
     /**
-     * Admin Dashboard.
+     * Admin Dashboard — scoped by organization.
      */
     private function adminDashboard()
     {
-        $totalUsers = User::role('user')->count();
-        $activeUsers = User::role('user')->where('status', 'active')->count();
+        $orgId = auth()->user()->organization_id;
+
+        $totalUsers = User::role('user')->where('organization_id', $orgId)->count();
+        $activeUsers = User::role('user')->where('organization_id', $orgId)->where('status', 'active')->count();
 
         // Users without active subscription
         $unpaidUsers = User::role('user')
+            ->where('organization_id', $orgId)
             ->whereDoesntHave('subscriptions', function ($query) {
                 $query->where('status', 'active')
                     ->where('end_date', '>=', now());
             })
             ->count();
 
-        // Recent payments
+        // Recent payments (scoped by org)
         $recentPayments = Payment::with('user')
             ->where('status', 'success')
+            ->whereHas('user', fn($q) => $q->where('organization_id', $orgId))
             ->latest()
             ->limit(10)
             ->get();
 
         // Recent registrations
         $recentUsers = User::role('user')
+            ->where('organization_id', $orgId)
             ->latest()
             ->limit(10)
             ->get();
@@ -163,11 +243,23 @@ class DashboardController extends Controller
             'credit_expiry_date' => $user->getCreditExpiryDate(),
         ];
 
+        // Current month info
+        $currentMonthInfo = [
+            'expected' => $user->getExpectedAmountForCurrentMonth(),
+            'paid' => $user->getTotalPaidThisMonth(),
+            'left_to_pay' => $user->getAmountLeftForCurrentMonth(),
+        ];
+
+        // Skipped months
+        $skippedMonths = $user->getSkippedMonths();
+
         return view('dashboard.user', compact(
             'activeSubscription',
             'payments',
             'subscriptionStatus',
-            'balanceInfo'
+            'balanceInfo',
+            'currentMonthInfo',
+            'skippedMonths'
         ));
     }
 }

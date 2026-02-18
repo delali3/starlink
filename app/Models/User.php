@@ -22,6 +22,7 @@ class User extends Authenticatable
         'email',
         'password',
         'status',
+        'organization_id',
     ];
 
     /**
@@ -44,6 +45,30 @@ class User extends Authenticatable
         return [
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Get the user's organization.
+     */
+    public function organization()
+    {
+        return $this->belongsTo(Organization::class);
+    }
+
+    /**
+     * Check if user is a superadmin.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return $this->hasRole('superadmin');
+    }
+
+    /**
+     * Check if user is an org admin.
+     */
+    public function isOrgAdmin(): bool
+    {
+        return $this->hasRole('admin') && $this->organization_id !== null;
     }
 
     /**
@@ -123,12 +148,13 @@ class User extends Authenticatable
 
     /**
      * Get total amount paid by user (successful payments only).
+     * Uses base_amount (what user actually paid, excluding service charges).
      */
     public function getTotalPaid(): float
     {
         return (float) $this->payments()
             ->where('status', 'success')
-            ->sum('amount');
+            ->sum('base_amount');
     }
 
     /**
@@ -222,5 +248,117 @@ class User extends Authenticatable
         }
         
         return $currentDate;
+    }
+
+    /**
+     * Get expected amount for the current month (weekdays only).
+     */
+    public function getExpectedAmountForCurrentMonth(): float
+    {
+        $startOfMonth = now()->startOfMonth();
+        $today = now()->startOfDay();
+        
+        // If user registered this month, start from registration date
+        if ($this->created_at->isCurrentMonth()) {
+            $startOfMonth = $this->created_at->startOfDay();
+        }
+        
+        // Count weekdays in current month up to today
+        $weekdaysCount = 0;
+        $currentDate = $startOfMonth->copy();
+        
+        while ($currentDate <= $today) {
+            if ($currentDate->isWeekday()) {
+                $weekdaysCount++;
+            }
+            $currentDate->addDay();
+        }
+        
+        $dailyRate = config('services.payment.daily_price', 3);
+        return $weekdaysCount * $dailyRate;
+    }
+
+    /**
+     * Get total payments made in the current month.
+     * Uses base_amount (what user actually paid, excluding service charges).
+     */
+    public function getTotalPaidThisMonth(): float
+    {
+        return (float) $this->payments()
+            ->where('status', 'success')
+            ->whereYear('created_at', now()->year)
+            ->whereMonth('created_at', now()->month)
+            ->sum('base_amount');
+    }
+
+    /**
+     * Get amount left to pay for current month.
+     */
+    public function getAmountLeftForCurrentMonth(): float
+    {
+        $expected = $this->getExpectedAmountForCurrentMonth();
+        $paid = $this->getTotalPaidThisMonth();
+        $leftToPay = $expected - $paid;
+        
+        return $leftToPay > 0 ? $leftToPay : 0;
+    }
+
+    /**
+     * Get months user skipped payments (months where expected > 0 but payment = 0).
+     */
+    public function getSkippedMonths(): array
+    {
+        $registrationDate = $this->created_at;
+        $today = now();
+        $skippedMonths = [];
+        
+        $currentMonth = $registrationDate->copy()->startOfMonth();
+        
+        while ($currentMonth < $today->startOfMonth()) {
+            // Calculate expected amount for this month
+            $monthStart = $currentMonth->copy();
+            $monthEnd = $currentMonth->copy()->endOfMonth();
+            
+            // Count weekdays in that month
+            $weekdaysCount = 0;
+            $date = $monthStart->copy();
+            
+            while ($date <= $monthEnd) {
+                if ($date->isWeekday()) {
+                    $weekdaysCount++;
+                }
+                $date->addDay();
+            }
+            
+            $expectedAmount = $weekdaysCount * config('services.payment.daily_price', 3);
+            
+            // Get payments made in that month
+            $paidAmount = $this->payments()
+                ->where('status', 'success')
+                ->whereYear('created_at', $currentMonth->year)
+                ->whereMonth('created_at', $currentMonth->month)
+                ->sum('amount');
+            
+            // If expected > 0 but paid = 0, it's a skipped month
+            if ($expectedAmount > 0 && $paidAmount == 0) {
+                $skippedMonths[] = [
+                    'month' => $currentMonth->format('F Y'),
+                    'expected' => $expectedAmount,
+                    'paid' => 0,
+                    'owed' => $expectedAmount,
+                ];
+            } elseif ($paidAmount < $expectedAmount) {
+                $skippedMonths[] = [
+                    'month' => $currentMonth->format('F Y'),
+                    'expected' => $expectedAmount,
+                    'paid' => $paidAmount,
+                    'owed' => $expectedAmount - $paidAmount,
+                ];
+            }
+            
+            $currentMonth->addMonth();
+        }
+        
+        return $skippedMonths;
     }
 }

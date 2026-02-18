@@ -8,7 +8,7 @@ use App\Models\User;
 use App\Services\OtpService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 
 class OtpLoginController extends Controller
@@ -36,6 +36,16 @@ class OtpLoginController extends Controller
         $request->validate([
             'phone' => ['required', 'string', 'regex:/^[0-9]{10,15}$/'],
         ]);
+
+        // Rate limit: 5 OTP requests per phone per hour
+        $rateLimitKey = 'otp-send:' . $request->phone;
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $seconds = RateLimiter::availableIn($rateLimitKey);
+            throw ValidationException::withMessages([
+                'phone' => ["Too many OTP requests. Please try again in " . ceil($seconds / 60) . " minute(s)."],
+            ]);
+        }
+        RateLimiter::hit($rateLimitKey, 3600);
 
         // Check if user exists
         $user = User::where('phone', $request->phone)->first();
@@ -86,7 +96,8 @@ class OtpLoginController extends Controller
             ]);
         }
 
-        Auth::login($user, $request->boolean('remember'));
+        // Login user with remember me enabled (1 year)
+        Auth::login($user, true);
 
         // Log the login
         AuditLog::log('user_login', $user);

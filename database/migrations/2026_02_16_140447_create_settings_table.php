@@ -11,8 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
+        Schema::dropIfExists('settings');
+
         Schema::create('settings', function (Blueprint $table) {
             $table->id();
+            $table->string('key')->unique();
+            $table->text('value')->nullable();
+            $table->string('type', 20)->default('string'); // string, integer, float, boolean, json
+            $table->string('group', 50)->index();
+            $table->text('description')->nullable();
             $table->timestamps();
         });
     }

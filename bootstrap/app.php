@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
             'check.user.status' => \App\Http\Middleware\CheckUserStatus::class,
+            'check.org.status' => \App\Http\Middleware\CheckOrganizationStatus::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

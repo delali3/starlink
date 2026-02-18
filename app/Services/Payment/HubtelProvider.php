@@ -2,6 +2,7 @@
 
 namespace App\Services\Payment;
 
+use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -15,11 +16,11 @@ class HubtelProvider implements PaymentProviderInterface
 
     public function __construct()
     {
-        $this->clientId = config('services.hubtel.client_id');
-        $this->clientSecret = config('services.hubtel.client_secret');
-        $this->merchantAccountNumber = config('services.hubtel.merchant_account_number');
-        $this->apiUrl = config('services.hubtel.api_url');
-        $this->callbackUrl = config('services.hubtel.callback_url');
+        $this->clientId = Setting::get('hubtel_client_id', config('services.hubtel.client_id'));
+        $this->clientSecret = Setting::get('hubtel_client_secret', config('services.hubtel.client_secret'));
+        $this->merchantAccountNumber = Setting::get('hubtel_merchant_account_number', config('services.hubtel.merchant_account_number'));
+        $this->apiUrl = Setting::get('hubtel_api_url', config('services.hubtel.api_url'));
+        $this->callbackUrl = Setting::get('hubtel_callback_url', config('services.hubtel.callback_url'));
     }
 
     /**

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use Illuminate\Support\Facades\Route;
 
@@ -15,4 +16,10 @@ Route::middleware('guest')->group(function () {
 
     Route::post('password/email', [PasswordResetLinkController::class, 'store'])
         ->name('password.email');
+
+    Route::get('password/reset/{token}', [NewPasswordController::class, 'create'])
+        ->name('password.reset');
+
+    Route::post('password/reset', [NewPasswordController::class, 'store'])
+        ->name('password.update');
 });

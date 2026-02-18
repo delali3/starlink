@@ -15,7 +15,7 @@
             <p class="text-gray-600 mb-4">Please wait while we verify your payment</p>
             <div class="text-sm text-gray-500 space-y-1">
                 <p>Reference: <span class="font-mono font-medium">{{ $payment->reference }}</span></p>
-                <p>Amount: <span class="font-semibold text-gray-900">GHC {{ number_format($payment->amount, 2) }}</span></p>
+                <p>Amount: <span class="font-semibold text-gray-900">GHC {{ number_format($payment->base_amount ?? $payment->amount, 2) }}</span></p>
             </div>
         </div>
 

@@ -15,7 +15,7 @@
                 </h2>
             </div>
 
-            <form class="mt-8 space-y-6" method="POST" action="{{ route('password.store') }}">
+            <form class="mt-8 space-y-6" method="POST" action="{{ route('password.update') }}">
                 @csrf
 
                 <!-- Password Reset Token -->

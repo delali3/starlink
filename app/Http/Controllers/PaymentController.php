@@ -4,8 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use App\Models\Payment;
+use App\Models\Setting;
+use App\Models\Subscription;
+use App\Models\User;
 use App\Services\Payment\PaymentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class PaymentController extends Controller
 {
@@ -139,12 +143,22 @@ class PaymentController extends Controller
     {
         $query = Payment::with('user');
 
+        // Scope by organization
+        $user = auth()->user();
+        if ($user->hasRole('admin') && $user->organization_id) {
+            $query->whereHas('user', fn($q) => $q->where('organization_id', $user->organization_id));
+        } elseif ($user->hasRole('superadmin') && session('admin_org_filter')) {
+            $query->whereHas('user', fn($q) => $q->where('organization_id', session('admin_org_filter')));
+        }
+
         // Search functionality
         if ($request->filled('search')) {
-            $query->whereHas('user', function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                    ->orWhere('phone', 'like', '%' . $request->search . '%');
-            })->orWhere('reference', 'like', '%' . $request->search . '%');
+            $query->where(function ($mainQ) use ($request) {
+                $mainQ->whereHas('user', function ($q) use ($request) {
+                    $q->where('name', 'like', '%' . $request->search . '%')
+                        ->orWhere('phone', 'like', '%' . $request->search . '%');
+                })->orWhere('reference', 'like', '%' . $request->search . '%');
+            });
         }
 
         // Filter by status
@@ -241,6 +255,83 @@ class PaymentController extends Controller
     {
         return redirect()->route('dashboard')
             ->with('warning', 'Payment was cancelled. You can try again anytime.');
+    }
+
+    /**
+     * Show manual/cash payment form for a user (admin/superadmin).
+     */
+    public function manualCreate(User $user)
+    {
+        return view('payments.manual', compact('user'));
+    }
+
+    /**
+     * Record a manual/cash payment for a user (admin/superadmin).
+     * No payment gateway, no service charges.
+     */
+    public function manualStore(Request $request, User $user)
+    {
+        $request->validate([
+            'amount' => ['required', 'numeric', 'min:1', 'max:10000'],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $amount = (float) $request->amount;
+        $dailyRate = (float) Setting::get('daily_price', config('services.payment.daily_price', 3));
+        $days = max(1, (int) floor($amount / $dailyRate));
+        $reference = 'CASH-' . strtoupper(Str::random(10)) . '-' . time();
+
+        // Create payment record — no service charge
+        $payment = Payment::create([
+            'user_id' => $user->id,
+            'reference' => $reference,
+            'amount' => $amount,
+            'base_amount' => $amount,
+            'service_charge' => 0,
+            'payment_provider' => 'cash',
+            'status' => 'success',
+            'paid_at' => now(),
+            'metadata' => [
+                'payment_type' => 'custom',
+                'recorded_by' => auth()->id(),
+                'recorded_by_name' => auth()->user()->name,
+                'note' => $request->note,
+            ],
+        ]);
+
+        // Create or extend subscription
+        $activeSubscription = $user->activeSubscription()->first();
+
+        if ($activeSubscription && $activeSubscription->end_date >= now()) {
+            $startDate = $activeSubscription->end_date->addDay();
+        } else {
+            $startDate = now();
+        }
+
+        $endDate = $startDate->copy()->addDays($days - 1);
+
+        $subscription = Subscription::create([
+            'user_id' => $user->id,
+            'type' => 'custom',
+            'amount' => $amount,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'status' => 'active',
+        ]);
+
+        $payment->update(['subscription_id' => $subscription->id]);
+
+        AuditLog::log('manual_payment_recorded', auth()->user(), [
+            'payment_id' => $payment->id,
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'amount' => $amount,
+            'days_added' => $days,
+            'note' => $request->note,
+        ]);
+
+        return redirect()->route('users.show', $user)
+            ->with('success', "Cash payment of GHC {$amount} recorded. {$days} day(s) added to {$user->name}'s subscription.");
     }
 
     /**

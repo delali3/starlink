@@ -2,6 +2,7 @@
 
 namespace App\Services\Payment;
 
+use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -13,8 +14,8 @@ class PaystackProvider implements PaymentProviderInterface
 
     public function __construct()
     {
-        $this->secretKey = config('services.paystack.secret_key');
-        $this->publicKey = config('services.paystack.public_key');
+        $this->secretKey = Setting::get('paystack_secret_key', config('services.paystack.secret_key')) ?? '';
+        $this->publicKey = Setting::get('paystack_public_key', config('services.paystack.public_key')) ?? '';
     }
 
     /**

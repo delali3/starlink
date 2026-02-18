@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -16,6 +17,7 @@ class AdminManagementController extends Controller
     public function index()
     {
         $admins = User::role(['admin', 'superadmin'])
+            ->with('organization')
             ->latest()
             ->paginate(20);
 
@@ -27,7 +29,9 @@ class AdminManagementController extends Controller
      */
     public function create()
     {
-        return view('admins.create');
+        $organizations = Organization::where('status', 'active')->get();
+
+        return view('admins.create', compact('organizations'));
     }
 
     /**
@@ -41,6 +45,7 @@ class AdminManagementController extends Controller
             'email' => ['nullable', 'email', 'unique:users'],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'role' => ['required', 'in:admin,superadmin'],
+            'organization_id' => ['required_if:role,admin', 'nullable', 'exists:organizations,id'],
         ]);
 
         // Only superadmin can create superadmin
@@ -54,6 +59,7 @@ class AdminManagementController extends Controller
             'email' => $request->email,
             'password' => Hash::make($request->password),
             'status' => 'active',
+            'organization_id' => $request->role === 'admin' ? $request->organization_id : null,
         ]);
 
         // Assign role
@@ -64,6 +70,7 @@ class AdminManagementController extends Controller
             'created_admin_id' => $user->id,
             'name' => $user->name,
             'role' => $request->role,
+            'organization_id' => $request->organization_id,
         ]);
 
         return redirect()->route('admins.index')

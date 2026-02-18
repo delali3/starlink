@@ -11,19 +11,39 @@
             </a>
             <h1 class="text-3xl font-bold text-gray-900 mt-2">{{ $user->name }}</h1>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-wrap">
+            <a href="{{ route('payments.manual.create', $user) }}" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium inline-flex items-center">
+                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+                </svg>
+                Record Cash Payment
+            </a>
+            @if(auth()->user()->hasRole('superadmin'))
+            <a href="{{ route('users.edit', $user) }}" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700">
+                Edit
+            </a>
+            @endif
             @if($user->status === 'active')
             <form action="{{ route('users.suspend', $user) }}" method="POST">
                 @csrf
-                <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg" onclick="return confirm('Suspend this user?')">
+                <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium" onclick="return confirm('Suspend this user?')">
                     Suspend User
                 </button>
             </form>
             @else
             <form action="{{ route('users.activate', $user) }}" method="POST">
                 @csrf
-                <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">
+                <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium">
                     Activate User
+                </button>
+            </form>
+            @endif
+            @if(auth()->user()->hasRole('superadmin'))
+            <form action="{{ route('users.destroy', $user) }}" method="POST">
+                @csrf
+                @method('DELETE')
+                <button type="submit" class="px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg text-sm font-medium" onclick="return confirm('Delete this user permanently? This cannot be undone.')">
+                    Delete
                 </button>
             </form>
             @endif

@@ -10,12 +10,20 @@
             <h1 class="text-3xl font-bold text-gray-900">Users Management</h1>
             <p class="text-gray-600 mt-1">Manage all registered users</p>
         </div>
-        <a href="{{ route('users.create') }}" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition">
-            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            Register New User
-        </a>
+        <div class="flex gap-2">
+            <a href="{{ route('export.users') }}?status={{ request('status') }}" class="inline-flex items-center px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition">
+                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export CSV
+            </a>
+            <a href="{{ route('users.create') }}" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition">
+                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Register New User
+            </a>
+        </div>
     </div>
 
     <!-- Filters -->
@@ -103,6 +111,9 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                             <a href="{{ route('users.show', $user) }}" class="text-indigo-600 hover:text-indigo-900">View</a>
+                            @if(auth()->user()->hasRole('superadmin'))
+                            <a href="{{ route('users.edit', $user) }}" class="text-amber-600 hover:text-amber-900">Edit</a>
+                            @endif
                             @if($user->status === 'active')
                             <form action="{{ route('users.suspend', $user) }}" method="POST" class="inline">
                                 @csrf
@@ -112,6 +123,13 @@
                             <form action="{{ route('users.activate', $user) }}" method="POST" class="inline">
                                 @csrf
                                 <button type="submit" class="text-green-600 hover:text-green-900">Activate</button>
+                            </form>
+                            @endif
+                            @if(auth()->user()->hasRole('superadmin'))
+                            <form action="{{ route('users.destroy', $user) }}" method="POST" class="inline">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="text-red-600 hover:text-red-900" onclick="return confirm('Delete this user permanently? This cannot be undone.')">Delete</button>
                             </form>
                             @endif
                         </td>
