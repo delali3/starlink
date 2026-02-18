@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->foreignId('subscription_id')->nullable()->constrained()->onDelete('set null');
-            $table->string('reference')->unique();
+            $table->string('reference', 191)->unique();
             $table->decimal('amount', 10, 2);
             $table->enum('payment_provider', ['paystack', 'hubtel']);
             $table->enum('status', ['pending', 'success', 'failed'])->default('pending');

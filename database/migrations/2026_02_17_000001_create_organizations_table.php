@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('organizations', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->string('slug')->unique();
+            $table->string('slug', 191)->unique();
             $table->string('domain')->nullable();
             $table->string('logo_path')->nullable();
             $table->enum('status', ['active', 'suspended'])->default('active');
